@@ -7,6 +7,8 @@ final class Plugin
     {
         // Priority 10 runs before WordPress's own check (priority 20).
         add_filter('authenticate', [self::class, 'authenticate'], 10, 3);
+
+        Admin\DiagnosticsPage::register();
     }
 
     /**
