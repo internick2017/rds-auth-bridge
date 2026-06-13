@@ -11,18 +11,36 @@ final class WpAuthFilter
      */
     public function handle($user, string $username, string $password)
     {
-        if ($user instanceof \WP_User) {
-            return $user; // an earlier handler already authenticated
+        // Respect a definitive result from an earlier-priority handler
+        // (another auth/security plugin) — never override it.
+        if ($user instanceof \WP_User || $user instanceof \WP_Error) {
+            return $user;
         }
 
         $outcome = $this->authenticator->authenticate($username, $password);
 
         return match ($outcome->status) {
             'authenticated' => $this->syncWpUser($outcome->user),
-            'invalid'       => new \WP_Error('rds_bad_credentials', '<strong>Error:</strong> ' . esc_html($outcome->message)),
-            'unavailable'   => new \WP_Error('rds_unavailable', esc_html($outcome->message)),
-            default         => $user, // passthrough -> let WordPress continue
+            'invalid'       => $this->reject('rds_bad_credentials', $outcome->message),
+            'unavailable'   => $this->reject('rds_unavailable', $outcome->message),
+            default         => $user, // passthrough -> WordPress handles its own users
         };
+    }
+
+    /**
+     * Authoritative rejection for a user that belongs to the external directory.
+     *
+     * We remove WordPress's default password handlers (priority 20) so they cannot
+     * overwrite our error — without this, a synced user's wrong password (or an RDS
+     * outage) would surface as WP's generic "incorrect password" instead of our
+     * specific message. WordPress runs the `authenticate` filter once per login
+     * request, so removing them here only affects this single login attempt.
+     */
+    private function reject(string $code, string $message): \WP_Error
+    {
+        remove_filter('authenticate', 'wp_authenticate_username_password', 20);
+        remove_filter('authenticate', 'wp_authenticate_email_password', 20);
+        return new \WP_Error($code, esc_html($message));
     }
 
     private function syncWpUser(ExternalUser $external): \WP_User|\WP_Error
@@ -44,6 +62,11 @@ final class WpAuthFilter
             return $newId;
         }
 
-        return get_user_by('id', $newId);
+        $wpUser = get_user_by('id', $newId);
+        if (! $wpUser instanceof \WP_User) {
+            return new \WP_Error('rds_sync_failed', esc_html('Authenticated, but the local account could not be created. Please try again.'));
+        }
+
+        return $wpUser;
     }
 }
