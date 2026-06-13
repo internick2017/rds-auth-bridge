@@ -1,0 +1,60 @@
+services:
+  # WordPress's own database (wp_users, posts, etc.)
+  wpdb:
+    image: mariadb:11
+    environment:
+      MARIADB_ROOT_PASSWORD: root
+      MARIADB_DATABASE: wordpress
+      MARIADB_USER: wp
+      MARIADB_PASSWORD: wp
+    volumes: [ "wpdb_data:/var/lib/mysql" ]
+
+  # External "RDS" database holding the legacy users (PostgreSQL)
+  rds:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: taxplatform
+      POSTGRES_USER: taxapp
+      POSTGRES_PASSWORD: taxsecret
+    ports: [ "127.0.0.1:15432:5432" ]
+    volumes:
+      - "rds_data:/var/lib/postgresql/data"
+      - "./docker/rds-init:/docker-entrypoint-initdb.d"
+
+  wordpress:
+    build: { context: ., dockerfile: docker/Dockerfile.wp }
+    depends_on: [ wpdb, rds ]
+    ports: [ "127.0.0.1:8930:80" ]
+    environment:
+      WORDPRESS_DB_HOST: wpdb
+      WORDPRESS_DB_USER: wp
+      WORDPRESS_DB_PASSWORD: wp
+      WORDPRESS_DB_NAME: wordpress
+      WORDPRESS_DEBUG: 1
+      RDS_DB_HOST: rds
+      RDS_DB_PORT: "5432"
+      RDS_DB_NAME: taxplatform
+      RDS_DB_USER: taxapp
+      RDS_DB_PASSWORD: taxsecret
+      RDS_DB_SSLMODE: disable
+    volumes:
+      - "wp_data:/var/www/html"
+      - "./:/var/www/html/wp-content/plugins/rds-auth-bridge"
+
+  # One-off PHPUnit / Composer runner (use: docker compose run --rm phpunit <cmd>)
+  phpunit:
+    build: { context: ., dockerfile: docker/Dockerfile.test }
+    depends_on: [ rds ]
+    environment:
+      RDS_DB_HOST: rds
+      RDS_DB_PORT: "5432"
+      RDS_DB_NAME: taxplatform
+      RDS_DB_USER: taxapp
+      RDS_DB_PASSWORD: taxsecret
+      RDS_DB_SSLMODE: disable
+    volumes: [ "./:/app" ]
+
+volumes:
+  wpdb_data:
+  rds_data:
+  wp_data:
