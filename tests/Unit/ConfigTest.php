@@ -6,16 +6,20 @@ use PHPUnit\Framework\TestCase;
 
 final class ConfigTest extends TestCase
 {
-    /** All env vars this class touches — cleared before every test. */
+    /** All env vars this class touches — saved/restored around every test. */
     private const ENV_KEYS = [
         'RDS_DB_HOST', 'RDS_DB_PORT', 'RDS_DB_NAME',
         'RDS_DB_USER', 'RDS_DB_PASSWORD', 'RDS_DB_SSLMODE',
     ];
 
+    /** @var array<string, string|false> */
+    private array $savedEnv = [];
+
     protected function setUp(): void
     {
-        // Clear container env vars before each test so tests are fully isolated.
+        // Save original values, then clear so tests start from a clean slate.
         foreach (self::ENV_KEYS as $k) {
+            $this->savedEnv[$k] = getenv($k);
             putenv($k);
         }
     }
@@ -27,8 +31,15 @@ final class ConfigTest extends TestCase
 
     protected function tearDown(): void
     {
+        // Restore original values so later test suites (e.g. integration) keep
+        // the env vars that were set by the Docker Compose service definition.
         foreach (self::ENV_KEYS as $k) {
-            putenv($k);
+            $original = $this->savedEnv[$k];
+            if ($original === false || $original === '') {
+                putenv($k);
+            } else {
+                putenv("$k=$original");
+            }
         }
     }
 
